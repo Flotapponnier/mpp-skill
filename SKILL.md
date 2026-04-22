@@ -14,64 +14,71 @@ You can use the Bash tool to execute these MPP commands:
 
 ```bash
 # Subscribe to a plan (startup, growth, or enterprise)
-bun src/index.ts mpp subscribe startup monthly
+bun run start subscribe startup monthly
 
 # Check subscription status and credits
-bun src/index.ts mpp status
+bun run start status
 
 # Top up credits ($10-$10,000)
-bun src/index.ts mpp topup 50
+bun run start topup 50
 
 # Create new API key
-bun src/index.ts mpp key-create
+bun run start key-create
 
 # Revoke API key
-bun src/index.ts mpp key-revoke <api-key>
+bun run start key-revoke <api-key>
 ```
 
 ### Market Data
 
 ```bash
 # Get token price
-bun src/index.ts mpp price bitcoin
-bun src/index.ts mpp price ethereum
+bun run start price bitcoin
+bun run start price ethereum
 
 # Get wallet positions
-bun src/index.ts mpp wallet 0x1234...
+bun run start wallet 0x1234...
 
 # Get trending tokens
-bun src/index.ts mpp lighthouse
+bun run start lighthouse
 ```
 
 ### Configuration
 
 ```bash
 # Show current MPP config
-bun src/index.ts mpp config
+bun run start config
 ```
 
 ## How to Use
 
 When a user asks about crypto prices, market data, or wants to subscribe to MPP:
 
-1. **For subscriptions**: Use `bun src/index.ts mpp subscribe <plan> <frequency>`
-2. **For price checks**: Use `bun src/index.ts mpp price <asset>`
-3. **For wallet analysis**: Use `bun src/index.ts mpp wallet <address>`
-4. **For trending tokens**: Use `bun src/index.ts mpp lighthouse`
+1. **For subscriptions**: Use `bun run start subscribe <plan> <frequency>`
+2. **For price checks**: Use `bun run start price <asset>`
+3. **For wallet analysis**: Use `bun run start wallet <address>`
+4. **For trending tokens**: Use `bun run start lighthouse`
+
+Alternatively, if installed in your agent's working directory:
+
+1. **For subscriptions**: Use `bun src/index.ts subscribe <plan> <frequency>`
+2. **For price checks**: Use `bun src/index.ts price <asset>`
+3. **For wallet analysis**: Use `bun src/index.ts wallet <address>`
+4. **For trending tokens**: Use `bun src/index.ts lighthouse`
 
 ## Example Interactions
 
 **User**: "Subscribe me to MPP startup plan"
-**You**: Execute `bun src/index.ts mpp subscribe startup monthly` and show the API key and agent ID.
+**You**: Execute `bun run start subscribe startup monthly` and show the API key and agent ID.
 
 **User**: "What's the price of Bitcoin?"
-**You**: Execute `bun src/index.ts mpp price bitcoin` and format the response nicely.
+**You**: Execute `bun run start price bitcoin` and format the response nicely.
 
 **User**: "Show me what's trending"
-**You**: Execute `bun src/index.ts mpp lighthouse` and present the trending tokens.
+**You**: Execute `bun run start lighthouse` and present the trending tokens.
 
 **User**: "Check my subscription status"
-**You**: Execute `bun src/index.ts mpp status` and show the plan, credits, and days left.
+**You**: Execute `bun run start status` and show the plan, credits, and days left.
 
 ## Important Notes
 

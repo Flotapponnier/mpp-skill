@@ -1,0 +1,34 @@
+{
+  "name": "mpp-skill",
+  "version": "1.0.0",
+  "description": "Machine Payments Protocol (MPP) skill for ClaudeHub/OpenClaw agents",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "mpp": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/index.ts"
+  },
+  "keywords": [
+    "mpp",
+    "mobula",
+    "claudehub",
+    "openclaw",
+    "agent",
+    "skill"
+  ],
+  "author": "Florent Tapponnier",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Flotapponnier/mpp-skill.git"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "bun": ">=1.0.0"
+  }
+}
