@@ -58,6 +58,7 @@ See [SKILL.md](./SKILL.md) for complete documentation and agent integration exam
 mpp-skill/
 ├── src/
 │   ├── index.ts           # CLI entry point
+│   ├── wallet.ts          # Secure wallet management (AES-256-GCM encrypted)
 │   ├── commands/
 │   │   └── mpp.ts         # Command handler
 │   └── mpp/
