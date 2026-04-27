@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { createHmac, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 const WALLETS_DIR = join(process.cwd(), ".claude", "claudeclaw", "wallets");
 const SECRET_FILE = join(process.cwd(), ".claude", "claudeclaw", "wallet.secret");
@@ -66,42 +67,11 @@ export interface UserWallet {
   createdAt: string;
 }
 
-/** Generate a new wallet for a user using openssl secp256k1. */
+/** Generate a new wallet for a user using viem (correct keccak256 derivation). */
 function generateWallet(): { address: string; privateKey: string } {
-  // Build minimal DER for secp256k1 private key
-  const privateKeyBytes = randomBytes(32);
-  const inner = Buffer.concat([
-    Buffer.from("020101", "hex"),
-    Buffer.from("0420", "hex"),
-    privateKeyBytes,
-    Buffer.from("a00706052b8104000a", "hex"),
-  ]);
-  const der = Buffer.concat([Buffer.from([0x30, inner.length]), inner]);
-
-  // Extract uncompressed public key via openssl
-  const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
-  const ecResult = spawnSync("openssl", ["ec", "-inform", "DER", "-pubout", "-outform", "DER"], {
-    input: der,
-    encoding: "buffer",
-  });
-  if (ecResult.status !== 0) {
-    throw new Error("openssl ec failed: " + ecResult.stderr?.toString());
-  }
-  const pubDer = ecResult.stdout as Buffer;
-  const idx = pubDer.lastIndexOf(0x04);
-  if (idx === -1 || pubDer.length - idx < 65) throw new Error("Could not parse public key");
-  const pubBytes = pubDer.slice(idx + 1, idx + 65); // 64 bytes X+Y
-
-  // Keccak256 of pub bytes -> last 20 = address
-  const keccakResult = spawnSync("openssl", ["dgst", "-sha3-256", "-binary"], {
-    input: pubBytes,
-    encoding: "buffer",
-  });
-  if (keccakResult.status !== 0) throw new Error("openssl keccak failed");
-  const hash = keccakResult.stdout as Buffer;
-  const address = "0x" + hash.slice(-20).toString("hex");
-
-  return { address, privateKey: "0x" + privateKeyBytes.toString("hex") };
+  const privateKey = generatePrivateKey();
+  const account = privateKeyToAccount(privateKey);
+  return { address: account.address, privateKey };
 }
 
 /** Create a wallet for a user. Throws if one already exists. */
