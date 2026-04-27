@@ -3,8 +3,9 @@
  *
  * Flow:
  *  1. Call Mobula endpoint → 402 with WWW-Authenticate: Payment header
- *  2. Parse challenge (id, request: {amount, currency, recipient})
- *  3. Sign + broadcast transferWithMemo(recipient, amount, challengeId) on Tempo
+ *  2. Parse challenge (id, realm, request: {amount, currency, recipient, methodDetails})
+ *  3. Sign + broadcast transferWithMemo(recipient, amount, attributionMemo) on Tempo,
+ *     where attributionMemo is the 32-byte structured MPP memo (see buildAttributionMemo)
  *  4. Retry with Authorization: Payment <base64url(credential)>
  *  5. Get 200 response
  *
@@ -55,6 +56,8 @@ interface MppChallenge {
   recipient: string;
   chainId: number;
   expires: string;
+  realm: string;
+  memo: Hex | null;
 }
 
 function parseWwwAuthenticate(header: string): MppChallenge | null {
@@ -63,11 +66,13 @@ function parseWwwAuthenticate(header: string): MppChallenge | null {
     const idMatch = header.match(/\bid="([^"]+)"/);
     const requestMatch = header.match(/\brequest="([^"]+)"/);
     const expiresMatch = header.match(/\bexpires="([^"]+)"/);
+    const realmMatch = header.match(/\brealm="([^"]+)"/);
 
     if (!idMatch || !requestMatch) return null;
 
     const id = idMatch[1];
     const expires = expiresMatch?.[1] ?? "";
+    const realm = realmMatch?.[1] ?? "mpp.mobula.io";
 
     // Decode base64url request
     const requestJson = Buffer.from(requestMatch[1], "base64").toString("utf8");
@@ -80,18 +85,37 @@ function parseWwwAuthenticate(header: string): MppChallenge | null {
       recipient: request.recipient,
       chainId: request.methodDetails?.chainId ?? 4217,
       expires,
+      realm,
+      memo: (request.methodDetails?.memo as Hex | undefined) ?? null,
     };
   } catch {
     return null;
   }
 }
 
-function challengeIdToBytes32(challengeId: string): Hex {
-  // Encode challengeId as bytes32 — right-pad with zeros if < 32 bytes
-  const bytes = Buffer.from(challengeId, "utf8");
-  const padded = Buffer.alloc(32);
-  bytes.copy(padded, 0, 0, Math.min(bytes.length, 32));
-  return `0x${padded.toString("hex")}`;
+/**
+ * Build an MPP attribution memo (32-byte structured memo).
+ *
+ * Layout (matches `mppx`/dist/tempo/Attribution.js, the lib used by Mobula's server):
+ *   bytes [0..4)   = keccak256("mpp")[0..4]      — fixed MPP tag
+ *   byte  [4]      = 0x01                         — version
+ *   bytes [5..15)  = keccak256(serverId)[0..10]   — server fingerprint
+ *   bytes [15..25) = 0x00..00                     — anonymous clientId
+ *   bytes [25..32) = keccak256(challengeId)[0..7] — challenge-bound nonce
+ *
+ * The server checks the tag + serverFingerprint to recognize MPP transfers.
+ * Without this layout, the server rejects with "memo is not bound to this challenge".
+ */
+function buildAttributionMemo(challengeId: string, realm: string): Hex {
+  const buf = new Uint8Array(32);
+  const tagHash = hexToBytes(keccak256(toBytes("mpp")));
+  buf.set(tagHash.slice(0, 4), 0);
+  buf[4] = 0x01;
+  const serverHash = hexToBytes(keccak256(toBytes(realm)));
+  buf.set(serverHash.slice(0, 10), 5);
+  const nonceHash = hexToBytes(keccak256(toBytes(challengeId)));
+  buf.set(nonceHash.slice(0, 7), 25);
+  return toHex(buf);
 }
 
 function buildCredential(challenge: MppChallenge, txHash: Hex, walletAddress: string): string {
@@ -182,7 +206,7 @@ export async function tempoFetch(
     transport: http(),
   });
 
-  const memo = challengeIdToBytes32(challenge.id);
+  const memo = challenge.memo ?? buildAttributionMemo(challenge.id, challenge.realm);
 
   let txHash: Hex;
   try {
