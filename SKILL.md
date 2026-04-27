@@ -103,12 +103,28 @@ const data = await tempoFetch(
 ## How the payment works (under the hood)
 
 1. Agent calls `GET https://mpp.mobula.io/api/2/token/price?asset=bitcoin` with no auth.
-2. Server returns **HTTP 402** with `WWW-Authenticate: Payment id="…", realm="mpp.mobula.io", method="tempo", request="<base64-json>"`. The decoded request specifies `amount` (in USDC.e atoms), `currency: USDC.e`, `recipient`, `methodDetails.chainId: 4217`.
-3. Skill signs and broadcasts `transferWithMemo(recipient, amount, challengeId)` on USDC.e (`0x20c000000000000000000000b9537d11c60e8b50`) on Tempo.
+2. Server returns **HTTP 402** with `WWW-Authenticate: Payment id="…", realm="mpp.mobula.io", method="tempo", request="<base64-json>"`. The decoded request specifies `amount` (in USDC.e atoms), `currency: USDC.e`, `recipient`, `methodDetails.chainId: 4217`, and optionally `methodDetails.memo` if the server pre-computes it.
+3. Skill signs and broadcasts `transferWithMemo(recipient, amount, attributionMemo)` on USDC.e (`0x20c000000000000000000000b9537d11c60e8b50`) on Tempo. **`attributionMemo` is NOT the raw challenge id** — it's a structured 32-byte memo (see "Memo layout" below) that the server's `mppx` lib uses to recognize and bind the payment to the challenge.
 4. Skill retries the same request with `Authorization: Payment <base64url(credential)>`, where `credential` references the tx hash.
-5. Server validates the tx and returns the data.
+5. Server validates the tx (memo layout + tx hash + amount + recipient) and returns the data.
 
 The skill does steps 2–4 automatically — agents only see the data response.
+
+### Memo layout (32 bytes)
+
+Mobula uses the official `mppx` lib server-side. The bytes32 memo passed to `transferWithMemo` must follow the MPP attribution format, otherwise the server rejects with `memo is not bound to this challenge`:
+
+| Bytes | Size | Field | Source |
+|-------|------|-------|--------|
+| 0..4 | 4 | MPP tag | `keccak256("mpp")[0..4]` (constant `0xef1ed712`) |
+| 4..5 | 1 | version | `0x01` |
+| 5..15 | 10 | server fingerprint | `keccak256(realm)[0..10]` (realm from `WWW-Authenticate`) |
+| 15..25 | 10 | client fingerprint | zeros for anonymous, else `keccak256(clientId)[0..10]` |
+| 25..32 | 7 | nonce | random 7 bytes, or `keccak256(challengeId)[0..7]` for a deterministic challenge-bound nonce |
+
+Common mistakes that produce a "memo is not bound" error: passing the raw `challengeId` (UTF-8 padded to 32), the base64url-decoded `challengeId`, `keccak256(challengeId)`, or any value that doesn't start with the 4-byte MPP tag.
+
+If `methodDetails.memo` is present in the challenge JSON, use that hex value directly (server pre-computed it) and skip the layout build.
 
 ## Key facts
 
