@@ -1,88 +1,132 @@
 ---
-description: Subscribe to Mobula MPP plans, check status, fetch crypto prices, wallet data, and execute trades
+description: Pay-as-you-go Mobula API access — fetch crypto prices, wallet positions, and market data using a Tempo wallet that pays per call (~$0.0004) in USDC.e. No subscription, no API key.
 ---
 
 # MPP (Machine Payments Protocol) Skill
 
-You have access to Mobula's MPP (Machine Payments Protocol) for crypto market data and trading.
+Mobula's MPP API is **pay-per-call** : every request is settled on-chain from your own wallet using USDC.e on the Tempo chain (chainId 4217). No signup, no API key — just a funded wallet.
 
-## Available Tools
+This skill gives you (the agent) everything needed to:
+1. Generate a Tempo wallet,
+2. Top it up via the public bridge,
+3. Make Mobula API calls and pay per-call automatically.
 
-You can use the Bash tool to execute these MPP commands:
-
-### Subscription Management
+## Setup (one-time, ~2 min)
 
 ```bash
-# Subscribe to a plan (startup, growth, or enterprise)
-bun run start subscribe startup monthly
+# 1. Clone the skill (skip if already installed in your skills dir)
+git clone https://github.com/Flotapponnier/mpp-skill.git
+cd mpp-skill
+bun install
 
-# Check subscription status and credits
-bun run start status
+# 2. Create a hot wallet (stored at ~/.mpp-skill/wallet.json, chmod 600)
+bun run start wallet-create
+# → prints address + bridge link
 
-# Top up credits ($10-$10,000)
-bun run start topup 50
+# 3. Fund the wallet with USDC.e on Tempo
+#    Open: https://relay.link/bridge/tempo?toAddress=<your-address>
+#    Bridge a few dollars of USDC from any chain (Base, Ethereum, …).
+#    Tempo's gas token IS USDC, so $1 of USDC.e is enough to make ~2,500 calls.
 
-# Create new API key
-bun run start key-create
-
-# Revoke API key
-bun run start key-revoke <api-key>
+# 4. Verify the balance
+bun run start balance
 ```
 
-### Market Data
+Once funded, every subsequent call is automatic — no manual signing.
+
+## CLI commands
+
+| Command | What it does |
+|---|---|
+| `bun run start wallet-create` | Generate a new Tempo wallet (won't overwrite an existing one) |
+| `bun run start balance` | Show wallet address, USDC.e balance, bridge link |
+| `bun run start price <asset>` | Token price — accepts name, symbol, or contract address |
+| `bun run start wallet <addr>` | Wallet portfolio positions |
+| `bun run start lighthouse` | Trending tokens |
+| `bun run start call <path> k=v…` | Generic call to any `/api/2/*` endpoint |
+
+Examples:
 
 ```bash
-# Get token price
 bun run start price bitcoin
-bun run start price ethereum
-
-# Get wallet positions
-bun run start wallet 0x1234...
-
-# Get trending tokens
+bun run start price 0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2
+bun run start wallet 0xd04b77bb40944110ec9c9e3165f67dadf9d52f21
 bun run start lighthouse
+bun run start call /api/2/wallet/activity wallet=0xabc...
 ```
 
-### Configuration
+## Programmatic use (inside an agent)
 
-```bash
-# Show current MPP config
-bun run start config
+Import directly from your TypeScript code — useful when each end-user has their own wallet (e.g. a Telegram bot where each Telegram ID gets a per-user encrypted wallet).
+
+### Per-user wallets (multi-tenant agents)
+
+```ts
+import { createUserWallet, getUserWalletAddress } from "mpp-skill/src/wallet";
+import { userMobulaCall, getUserTempoBalance } from "mpp-skill/src/mpp/user-mpp";
+
+// On first interaction with a Telegram user
+const userId = 1162998296;  // Telegram numeric ID
+let address = await getUserWalletAddress(userId);
+if (!address) {
+  const w = await createUserWallet(userId);
+  address = w.address;
+  // Tell the user to fund it:
+  // https://relay.link/bridge/tempo?toAddress=${address}
+}
+
+// Check funds
+const bal = await getUserTempoBalance(userId);
+console.log(`User has $${bal?.usd ?? 0} USDC.e on Tempo`);
+
+// Make an API call (paid from the user's own wallet)
+const price = await userMobulaCall(userId, "/api/2/token/price", { asset: "bitcoin" });
 ```
 
-## How to Use
+Per-user wallets are stored at `.claude/claudeclaw/wallets/{userId}.json`, AES-256-GCM encrypted with a key derived from `HMAC-SHA256(WALLET_SECRET, userId)`. The secret is auto-generated once at `.claude/claudeclaw/wallet.secret` (chmod 600). Different users cannot decrypt each other's keys.
 
-When a user asks about crypto prices, market data, or wants to subscribe to MPP:
+### Direct low-level call
 
-1. **For subscriptions**: Use `bun run start subscribe <plan> <frequency>`
-2. **For price checks**: Use `bun run start price <asset>`
-3. **For wallet analysis**: Use `bun run start wallet <address>`
-4. **For trending tokens**: Use `bun run start lighthouse`
+If you already have a private key and want full control:
 
-Alternatively, if installed in your agent's working directory:
+```ts
+import { tempoFetch } from "mpp-skill/src/mpp/tempo-client";
+import type { Hex } from "viem";
 
-1. **For subscriptions**: Use `bun src/index.ts subscribe <plan> <frequency>`
-2. **For price checks**: Use `bun src/index.ts price <asset>`
-3. **For wallet analysis**: Use `bun src/index.ts wallet <address>`
-4. **For trending tokens**: Use `bun src/index.ts lighthouse`
+const data = await tempoFetch(
+  "/api/2/token/price",
+  { asset: "ethereum" },
+  process.env.TEMPO_PRIVATE_KEY as Hex,
+);
+```
 
-## Example Interactions
+## How the payment works (under the hood)
 
-**User**: "Subscribe me to MPP startup plan"
-**You**: Execute `bun run start subscribe startup monthly` and show the API key and agent ID.
+1. Agent calls `GET https://mpp.mobula.io/api/2/token/price?asset=bitcoin` with no auth.
+2. Server returns **HTTP 402** with `WWW-Authenticate: Payment id="…", realm="mpp.mobula.io", method="tempo", request="<base64-json>"`. The decoded request specifies `amount` (in USDC.e atoms), `currency: USDC.e`, `recipient`, `methodDetails.chainId: 4217`.
+3. Skill signs and broadcasts `transferWithMemo(recipient, amount, challengeId)` on USDC.e (`0x20c000000000000000000000b9537d11c60e8b50`) on Tempo.
+4. Skill retries the same request with `Authorization: Payment <base64url(credential)>`, where `credential` references the tx hash.
+5. Server validates the tx and returns the data.
 
-**User**: "What's the price of Bitcoin?"
-**You**: Execute `bun run start price bitcoin` and format the response nicely.
+The skill does steps 2–4 automatically — agents only see the data response.
 
-**User**: "Show me what's trending"
-**You**: Execute `bun run start lighthouse` and present the trending tokens.
+## Key facts
 
-**User**: "Check my subscription status"
-**You**: Execute `bun run start status` and show the plan, credits, and days left.
+- **Chain**: Tempo (chainId `4217`, RPC `https://rpc.tempo.xyz`)
+- **Token**: USDC.e (`0x20c000000000000000000000b9537d11c60e8b50`)
+- **Gas**: paid in USDC (Tempo uses USDC as native gas token — no separate ETH needed)
+- **Cost per call**: ~$0.0004 typical, never above the amount specified in the 402 challenge
+- **Bridge**: https://relay.link/bridge/tempo — bridges from Base, Ethereum, Arbitrum, etc.
 
-## Important Notes
+## Common errors
 
-- Config is stored in `.claude/claudeclaw/mpp/config.json`
-- Always use the Bash tool to execute these commands
-- Format the JSON responses nicely for the user
-- If subscription fails, guide user to create an account on admin.mobula.io first
+| Error | Cause | Fix |
+|---|---|---|
+| `No wallet found` | First-time setup not done | `bun run start wallet-create` |
+| `Insufficient Tempo balance: you have $0.0000…` | Wallet not funded yet | Bridge USDC.e via the printed link |
+| `Could not parse challenge from: …` | Server didn't return a Tempo `WWW-Authenticate` header | Likely an upstream issue — retry or report |
+| `Tempo tx failed: …` | RPC error or revert on-chain | Check balance and `https://explorer.tempo.xyz` for the address |
+
+## When to use this vs a subscription
+
+Mobula's subscription endpoints (`/agent/x402/subscribe`, etc.) are **not currently configured** in production. Until they are, this pay-per-call flow is the only way to call MPP API endpoints from an agent. The CLI returns a clear error if you try the legacy `subscribe` / `status` / `topup` / `key-create` commands.

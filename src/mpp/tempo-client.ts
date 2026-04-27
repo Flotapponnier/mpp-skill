@@ -36,7 +36,10 @@ const TEMPO_CHAIN = {
 } as const;
 
 // USDC.e on Tempo
-const USDC_E = "0x20c000000000000000000000b9537d11c60e8b50" as const;
+export const USDC_E = "0x20c000000000000000000000b9537d11c60e8b50" as const;
+
+// Public bridge UI for moving funds onto Tempo
+export const BRIDGE_URL = "https://relay.link/bridge/tempo";
 
 const USDC_ABI = parseAbi([
   "function transferWithMemo(address to, uint256 amount, bytes32 memo) external returns (bool)",

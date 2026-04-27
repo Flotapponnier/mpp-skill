@@ -1,80 +1,84 @@
 # mpp-skill
 
-Machine Payments Protocol (MPP) skill for ClaudeHub/OpenClaw agents.
+Pay-as-you-go Mobula API skill for ClaudeHub / OpenClaw agents.
 
-Subscribe to Mobula MPP plans, check status, fetch crypto prices, wallet data, and execute trades.
+Fetch crypto prices, wallet positions, and market data without any signup, API key, or subscription. Each call costs ~$0.0004 in USDC.e on the Tempo chain (chainId 4217), settled directly from a wallet you control.
 
-## Installation
-
-### For ClaudeHub/OpenClaw Agents
-
-Add this skill to your agent by cloning it into your skills directory:
-
-```bash
-cd ~/your-agent/skills/
-git clone https://github.com/Flotapponnier/mpp-skill.git mpp
-```
-
-### Standalone CLI Usage
+## Quick start
 
 ```bash
 git clone https://github.com/Flotapponnier/mpp-skill.git
 cd mpp-skill
-bun run start help
-```
+bun install
 
-## Quick Start
+# 1. Create a Tempo wallet (saved at ~/.mpp-skill/wallet.json, chmod 600)
+bun run start wallet-create
 
-```bash
-# Subscribe to MPP startup plan
-bun run start subscribe startup monthly
+# 2. Fund it with USDC.e via the bridge link printed by step 1
+#    https://relay.link/bridge/tempo?toAddress=<your-address>
 
-# Check your subscription status
-bun run start status
-
-# Get Bitcoin price
+# 3. Make calls
 bun run start price bitcoin
-
-# Get trending tokens
+bun run start wallet 0xd04b77bb40944110ec9c9e3165f67dadf9d52f21
 bun run start lighthouse
 ```
 
-## Usage
+That's it — no API key, no signup, no subscription.
 
-See [SKILL.md](./SKILL.md) for complete documentation and agent integration examples.
+## How it works
 
-## Features
+When you hit `https://mpp.mobula.io/api/2/*` Mobula returns HTTP 402 with a payment challenge. This skill:
+1. Decodes the challenge,
+2. Signs and broadcasts `transferWithMemo` on USDC.e (Tempo, chainId 4217) from your wallet,
+3. Retries the request with the resulting tx hash as a payment credential,
+4. Returns the data.
 
-- 💳 **Subscription management** - startup, growth, enterprise plans with monthly/yearly billing
-- 💰 **Credit top-ups** - Add credits to your account ($10-$10,000)
-- 🔑 **API key management** - Create and revoke API keys
-- 📊 **Real-time crypto prices** - Get token prices for any asset
-- 👛 **Wallet position tracking** - Analyze wallet holdings and positions
-- 🔥 **Trending token discovery** - Find what's hot in crypto markets
+Tempo's gas is USDC (no separate ETH required), so a few dollars of USDC.e last for thousands of calls.
 
-## Project Structure
+## Use as an agent skill
+
+```bash
+cd ~/your-agent/skills/
+git clone https://github.com/Flotapponnier/mpp-skill.git mpp
+cd mpp && bun install
+```
+
+Then from your agent code:
+
+```ts
+// Per-user encrypted wallets (one wallet per Telegram user, etc.)
+import { createUserWallet, getUserWalletAddress } from "mpp-skill/src/wallet";
+import { userMobulaCall } from "mpp-skill/src/mpp/user-mpp";
+
+const userId = 1162998296;
+if (!(await getUserWalletAddress(userId))) await createUserWallet(userId);
+const price = await userMobulaCall(userId, "/api/2/token/price", { asset: "bitcoin" });
+```
+
+See [SKILL.md](./SKILL.md) for the full agent-facing docs, payment flow internals, and the per-call vs subscription decision.
+
+## Project structure
 
 ```
 mpp-skill/
 ├── src/
-│   ├── index.ts           # CLI entry point
-│   ├── wallet.ts          # Secure wallet management (AES-256-GCM encrypted)
+│   ├── index.ts             # CLI entry
+│   ├── cli-wallet.ts        # Single hot wallet for the CLI (~/.mpp-skill/wallet.json)
+│   ├── wallet.ts            # Per-user encrypted wallets (for multi-tenant agents)
 │   ├── commands/
-│   │   └── mpp.ts         # Command handler
+│   │   └── mpp.ts           # CLI command handler
 │   └── mpp/
-│       ├── mpp-client.ts  # Main MPP client
-│       ├── x402-client.ts # X402 protocol client
-│       ├── tempo-client.ts # Tempo protocol client
-│       ├── trading.ts     # Trading utilities
-│       └── user-mpp.ts    # User MPP utilities
-├── SKILL.md               # Skill documentation
+│       ├── tempo-client.ts  # 402 → sign → retry flow on Tempo USDC.e
+│       └── user-mpp.ts      # Helpers tying per-user wallets to tempoFetch
+├── SKILL.md
 ├── package.json
 └── README.md
 ```
 
 ## Requirements
 
-- Bun >= 1.0.0
+- Bun ≥ 1.0.0
+- viem (auto-installed via `bun install`)
 
 ## License
 

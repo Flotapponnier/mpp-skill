@@ -1,7 +1,7 @@
 {
   "name": "mpp-skill",
-  "version": "1.0.0",
-  "description": "Machine Payments Protocol (MPP) skill for ClaudeHub/OpenClaw agents",
+  "version": "2.0.0",
+  "description": "Machine Payments Protocol (MPP) skill for ClaudeHub/OpenClaw agents — pay-as-you-go Mobula API calls via Tempo",
   "type": "module",
   "main": "src/index.ts",
   "bin": {
@@ -13,6 +13,8 @@
   "keywords": [
     "mpp",
     "mobula",
+    "tempo",
+    "x402",
     "claudehub",
     "openclaw",
     "agent",
@@ -24,7 +26,9 @@
     "type": "git",
     "url": "https://github.com/Flotapponnier/mpp-skill.git"
   },
-  "dependencies": {},
+  "dependencies": {
+    "viem": "^2.48.4"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
