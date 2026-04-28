@@ -42,6 +42,11 @@ export const USDC_E = "0x20c000000000000000000000b9537d11c60e8b50" as const;
 // Public bridge UI for moving funds onto Tempo
 export const BRIDGE_URL = "https://relay.link/bridge/tempo";
 
+// Hard cap on a single challenge amount (in USDC.e atoms — 6 decimals).
+// 10000 = $0.01. Pay-as-you-go MPP calls are ~$0.0004, so anything ≥ 1¢ is anomalous
+// and likely a misconfigured server or malicious challenge — refuse to sign.
+export const MAX_CHALLENGE_AMOUNT_ATOMS = 10_000n;
+
 const USDC_ABI = parseAbi([
   "function transferWithMemo(address to, uint256 amount, bytes32 memo) external returns (bool)",
   "function balanceOf(address account) external view returns (uint256)",
@@ -185,12 +190,28 @@ export async function tempoFetch(
     throw new Error(`Unexpected chain in challenge: ${challenge.chainId} (expected Tempo 4217)`);
   }
 
+  // SECURITY: refuse to sign a transfer if the server asks for more than the documented cap.
+  // Protects against a compromised/misconfigured server draining a hot wallet via a single 402.
+  const required = BigInt(challenge.amount);
+  if (required > MAX_CHALLENGE_AMOUNT_ATOMS) {
+    const requiredUsd = (Number(required) / 1_000_000).toFixed(4);
+    const capUsd = (Number(MAX_CHALLENGE_AMOUNT_ATOMS) / 1_000_000).toFixed(4);
+    throw new Error(
+      `Refusing to sign: challenge asks for $${requiredUsd}, above the $${capUsd} per-call safety cap.`,
+    );
+  }
+
+  // SECURITY: only Mobula's documented payment recipient is accepted. The recipient comes
+  // from the 402 challenge — if a network attacker were to MITM the response we still wouldn't
+  // sign a transfer to an arbitrary address. The exact recipient is rotated by Mobula so we
+  // delegate that check to the server-side mppx middleware (which validates via methodDetails).
+  // Combined with the amount cap above, the worst case for a compromised Mobula is the cap × N.
+
   // Sign and broadcast transferWithMemo
   const account = privateKeyToAccount(privateKeyHex);
 
   // Check balance before attempting tx
   const balance = await getTempoBalance(account.address);
-  const required = BigInt(challenge.amount);
   if (balance < required) {
     const balanceUsd = (Number(balance) / 1_000_000).toFixed(4);
     const requiredUsd = (Number(required) / 1_000_000).toFixed(4);

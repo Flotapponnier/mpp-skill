@@ -12,10 +12,13 @@
  */
 
 import { join } from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, chmod, readFile, writeFile, access } from "node:fs/promises";
 import { createHmac, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { execSync } from "node:child_process";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+
+async function fileExists(p: string): Promise<boolean> {
+  try { await access(p); return true; } catch { return false; }
+}
 
 const WALLETS_DIR = join(process.cwd(), ".claude", "claudeclaw", "wallets");
 const SECRET_FILE = join(process.cwd(), ".claude", "claudeclaw", "wallet.secret");
@@ -24,14 +27,13 @@ let _secret: Buffer | null = null;
 
 async function getSecret(): Promise<Buffer> {
   if (_secret) return _secret;
-  const f = Bun.file(SECRET_FILE);
-  if (await f.exists()) {
-    _secret = Buffer.from(await f.text(), "hex");
+  if (await fileExists(SECRET_FILE)) {
+    _secret = Buffer.from(await readFile(SECRET_FILE, "utf8"), "hex");
   } else {
     _secret = randomBytes(32);
-    await Bun.write(SECRET_FILE, _secret.toString("hex"));
-    // Restrict permissions
-    try { execSync(`chmod 600 "${SECRET_FILE}"`); } catch {}
+    await mkdir(join(SECRET_FILE, ".."), { recursive: true });
+    await writeFile(SECRET_FILE, _secret.toString("hex"));
+    await chmod(SECRET_FILE, 0o600);
   }
   return _secret;
 }
@@ -78,7 +80,7 @@ function generateWallet(): { address: string; privateKey: string } {
 export async function createUserWallet(userId: number): Promise<UserWallet> {
   await mkdir(WALLETS_DIR, { recursive: true });
   const path = walletPath(userId);
-  if (await Bun.file(path).exists()) {
+  if (await fileExists(path)) {
     throw new Error("Wallet already exists for this user");
   }
 
@@ -92,8 +94,8 @@ export async function createUserWallet(userId: number): Promise<UserWallet> {
     createdAt: new Date().toISOString(),
   };
 
-  await Bun.write(path, JSON.stringify(record, null, 2));
-  try { execSync(`chmod 600 "${path}"`); } catch {}
+  await writeFile(path, JSON.stringify(record, null, 2));
+  await chmod(path, 0o600);
 
   return { address, createdAt: record.createdAt };
 }
@@ -101,17 +103,17 @@ export async function createUserWallet(userId: number): Promise<UserWallet> {
 /** Get a user's wallet address (public info only). Returns null if no wallet. */
 export async function getUserWalletAddress(userId: number): Promise<string | null> {
   const path = walletPath(userId);
-  if (!await Bun.file(path).exists()) return null;
-  const record = JSON.parse(await Bun.file(path).text());
+  if (!(await fileExists(path))) return null;
+  const record = JSON.parse(await readFile(path, "utf8"));
   return record.address ?? null;
 }
 
 /** Get the decrypted private key for a user's wallet. Only call for the user's own operations. */
 export async function getUserPrivateKey(userId: number): Promise<string | null> {
   const path = walletPath(userId);
-  if (!await Bun.file(path).exists()) return null;
+  if (!(await fileExists(path))) return null;
   const secret = await getSecret();
   const key = deriveKey(secret, userId);
-  const record = JSON.parse(await Bun.file(path).text());
+  const record = JSON.parse(await readFile(path, "utf8"));
   return decrypt(key, record.encryptedKey);
 }

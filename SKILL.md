@@ -19,7 +19,8 @@ git clone https://github.com/Flotapponnier/mpp-skill.git
 cd mpp-skill
 bun install
 
-# 2. Create a hot wallet (stored at ~/.mpp-skill/wallet.json, chmod 600)
+# 2. Create a hot wallet (AES-256-GCM encrypted at ~/.mpp-skill/wallet.json,
+#    encryption key at ~/.mpp-skill/.secret, both chmod 600)
 bun run start wallet-create
 # → prints address + bridge link
 
