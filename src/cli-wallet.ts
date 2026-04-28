@@ -85,10 +85,31 @@ function decrypt(key: Buffer, data: string): string {
 export async function loadCliWallet(): Promise<CliWallet | null> {
   if (!(await exists(CLI_WALLET_FILE))) return null;
   const raw = await readFile(CLI_WALLET_FILE, "utf8");
-  const stored = JSON.parse(raw) as StoredWallet;
-  if (stored.v !== 1) {
-    throw new Error(`Unsupported wallet version: ${(stored as { v: number }).v}`);
+  const parsed = JSON.parse(raw) as Partial<StoredWallet> & Partial<CliWallet>;
+
+  // Backward-compat: pre-2.1 wallets were stored as plaintext { address, privateKey, createdAt }.
+  // Detect, migrate to encrypted-at-rest in place, and continue.
+  if (!parsed.v && typeof parsed.privateKey === "string" && typeof parsed.address === "string") {
+    const secret = await getOrCreateSecret();
+    const stored: StoredWallet = {
+      v: 1,
+      address: parsed.address,
+      encryptedKey: encrypt(secret, parsed.privateKey),
+      createdAt: parsed.createdAt ?? new Date().toISOString(),
+    };
+    await writeFile(CLI_WALLET_FILE, JSON.stringify(stored, null, 2));
+    await chmod(CLI_WALLET_FILE, 0o600);
+    return {
+      address: parsed.address,
+      privateKey: parsed.privateKey as Hex,
+      createdAt: stored.createdAt,
+    };
   }
+
+  if (parsed.v !== 1) {
+    throw new Error(`Unsupported wallet version: ${parsed.v}`);
+  }
+  const stored = parsed as StoredWallet;
   const secret = await getOrCreateSecret();
   const privateKey = decrypt(secret, stored.encryptedKey) as Hex;
   return { address: stored.address, privateKey, createdAt: stored.createdAt };
